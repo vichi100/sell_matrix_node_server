@@ -1,10 +1,22 @@
 const WebSocket = require('ws');
+const { processUtterance, cleanupCallContext } = require('./pipelineService');
 
-function setupDeepgramWebSocket(server) {
+function setupDeepgramWebSocket(server, activeCalls) {
     const wss = new WebSocket.Server({ server, path: '/media-stream' });
 
     wss.on('connection', (ws) => {
         console.log('WebSocket connection established on /media-stream');
+
+        // Find the call_control_id tied to this specific WebSocket stream
+        // Telnyx unfortunately doesn't send the ID in the WS URL,
+        // so we'll grab the most recently answered call as a rough proxy (in production, use custom stream URLs)
+        let call_control_id = 'unknown_call';
+        for (const [id, callData] of activeCalls.entries()) {
+            if (callData.status === 'answered') {
+                call_control_id = id;
+                break;
+            }
+        }
 
         // Connect directly to Deepgram API via raw WebSocket (bypasses SDK param issues)
         const dgUrl = [
@@ -17,9 +29,6 @@ function setupDeepgramWebSocket(server) {
             '&endpointing=300',       // Force finalize quickly after speech pauses
             '&utterance_end_ms=1000', // Hard fallback for long silences
             '&vad_events=true',       // Voice activity detection
-            '&smart_format=true',     // Cleans up punctuation and numbers
-            '&dictation=true',        // Ignores background noise to focus on spoken words
-            '&filler_words=false'     // Don't transcribe "um", "uh", or background hums
         ].join('');
 
         const dgWs = new WebSocket(dgUrl, {
@@ -30,6 +39,9 @@ function setupDeepgramWebSocket(server) {
         const audioBuffer = [];
         let lastWordEnd = 0;       // Track highest timestamp of printed words
         let printedAnything = false; // Track if we've outputted words for the current sentence
+
+        // Buffer to hold the active sentence before sending to LLM
+        let utteranceBuffer = [];
 
         dgWs.on('open', () => {
             console.log('\nDeepgram connection opened. Flushing buffered audio...');
@@ -59,6 +71,7 @@ function setupDeepgramWebSocket(server) {
                     for (const wordObj of words) {
                         if (wordObj.end > lastWordEnd) {
                             process.stdout.write(wordObj.word + ' ');
+                            utteranceBuffer.push(wordObj.punctuated_word || wordObj.word); // Save for LLM
                             lastWordEnd = wordObj.end;
                             printedAnything = true;
                         }
@@ -70,12 +83,21 @@ function setupDeepgramWebSocket(server) {
                             process.stdout.write('..... ');
                             printedAnything = false;
                         }
+                        // Send full sentence to LLM pipeline
+                        if (utteranceBuffer.length > 0) {
+                            processUtterance(call_control_id, utteranceBuffer.join(' '), activeCalls);
+                            utteranceBuffer = [];
+                        }
                         lastWordEnd = 0; // Reset timeline for new sentence
                     }
                 } else if (msgType === 'UtteranceEnd') {
                     if (printedAnything) {
                         process.stdout.write('..... ');
                         printedAnything = false;
+                    }
+                    if (utteranceBuffer.length > 0) {
+                        processUtterance(call_control_id, utteranceBuffer.join(' '), activeCalls);
+                        utteranceBuffer = [];
                     }
                     lastWordEnd = 0;
                 }

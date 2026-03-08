@@ -29,7 +29,7 @@ app.get('/', (req, res) => {
 
 // Setup HTTP and WebSocket Servers
 const server = http.createServer(app);
-setupDeepgramWebSocket(server);
+setupDeepgramWebSocket(server, dashboardModule.activeCalls);
 
 server.listen(PORT, () => {
     console.log(`Server is listening on port ${PORT}`);
