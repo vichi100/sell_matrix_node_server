@@ -23,6 +23,7 @@
   "dependencies": {
     "@deepgram/sdk": "^3.13.0",
     "@google/genai": "^1.44.0",
+    "@soniox/node": "^1.1.2",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",

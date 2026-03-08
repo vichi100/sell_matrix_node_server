@@ -7,6 +7,7 @@ const telnyx = require('telnyx')(process.env.TELNYX_API_KEY);
 const { setupDashboardRoutes } = require('./src/routes/dashboardRoutes');
 const { setupTelnyxRoutes } = require('./src/routes/telnyxRoutes');
 const { setupDeepgramWebSocket } = require('./src/services/deepgramService');
+const { setupSonioxWebSocket } = require('./src/services/sonioxService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,8 +30,16 @@ app.get('/', (req, res) => {
 
 // Setup HTTP and WebSocket Servers
 const server = http.createServer(app);
-setupDeepgramWebSocket(server, dashboardModule.activeCalls);
+
+// Configure Transcription Provider
+const transcriber = process.env.TRANSCRIPT_PROVIDER || 'deepgram';
+if (transcriber === 'soniox') {
+    setupSonioxWebSocket(server, dashboardModule.activeCalls);
+} else {
+    setupDeepgramWebSocket(server, dashboardModule.activeCalls);
+}
 
 server.listen(PORT, () => {
     console.log(`Server is listening on port ${PORT}`);
+    console.log(`Transcription Provider: ${transcriber.toUpperCase()}`);
 });

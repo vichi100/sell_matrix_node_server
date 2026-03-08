@@ -51,7 +51,8 @@ function setupTelnyxRoutes(telnyx, activeCalls) {
                     stream_url: streamUrl,
                     stream_track: 'inbound_track' // Stream audio coming from the caller
                 });
-                console.log(`Started media streaming to ${streamUrl}. Deepgram will transcribe via WebSocket.`);
+                const transcriberName = (process.env.TRANSCRIPT_PROVIDER || 'deepgram').toUpperCase();
+                console.log(`Started media streaming to ${streamUrl}. ${transcriberName} will transcribe via WebSocket.\n`);
 
                 // Update call status
                 if (activeCalls.has(call_control_id)) {
