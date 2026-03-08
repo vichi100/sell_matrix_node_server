@@ -21,8 +21,8 @@ async function processUtterance(call_control_id, newSentence, activeCalls) {
     const contextHistory = callContexts.get(call_control_id);
     contextHistory.push(`Caller: ${newSentence.trim()}`);
 
-    // We only send the last ~10 sentences to the LLM to keep inference fast and cheap
-    const recentContext = contextHistory.slice(-10).join('\n');
+    // We only send the last ~5 sentences (approx 1 minute) to the LLM to keep inference fast and cheap
+    const recentContext = contextHistory.slice(-5).join('\n');
 
     // Log that pipeline started for debug
     console.log(`\n[Pipeline] Triggered for call ${call_control_id.slice(-6)}...`);
@@ -54,8 +54,8 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     - "Not Interested" (Trying to leave, hanging up, angry, "नहीं चाहिए")
     - "Neutral" (Pleasantries, greeting, unclear)
 
-    Return ONLY a raw JSON object with the translation and the intent:
-    { "english_translation": "Briefly translate the dialogue to English here to ensure you understood it", "intent": "Chosen Category", "reasoning": "1 short sentence why" }
+    Return ONLY a raw JSON object with the translation, the intent, a provisional AI estimated fast-score (0-100), and reasoning:
+    { "english_translation": "Briefly translate the dialogue to English", "intent": "Chosen Category", "provisional_score": 65, "reasoning": "1 short sentence why" }
     `;
 
     const signalPrompt = `
@@ -77,12 +77,8 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     const finalIntent = intentResult?.intent || 'Neutral';
     const finalSignals = signalResult?.buying_signals || [];
 
-    // Quick heuristic score for instant UI feedback while deep-score calculates
-    let fastScore = 50;
-    if (finalIntent === 'Ready to Buy') fastScore = 90;
-    else if (finalIntent === 'Interested') fastScore = 75;
-    else if (finalSignals.length > 0) fastScore += (finalSignals.length * 5);
-    else if (finalIntent === 'Not Interested' || finalIntent === 'Objection') fastScore = 20;
+    // The AI now decides the instant Fast Score dynamically based on organic dialogue cues, not a rigid script!
+    let fastScore = intentResult?.provisional_score || 45;
 
     // Fast Dashboard Update 1 (< 800ms)
     updateDashboard(call_control_id, activeCalls, finalIntent, finalSignals, fastScore);
@@ -91,7 +87,8 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     // === Step 2: SEQUENTIAL Deep Score Engine ===
     const scorePrompt = `
     You are an AI sales assistant calculating a deep, contextual "Interest Score" from 0 to 100.
-    Based on the caller's transcript, intent, and signals, calculate the highly accurate final score.
+    You previously estimated a provisional score of ${fastScore} based on their instant intent. 
+    Now, deeply review the full transcript context one last time to output the absolute final refined score.
     Understand that the customer may be speaking Hindi (Devanagari script) or Hinglish. Always translate the context to English in your mind before scoring.
     - 0-20: Hostile/Hanging up
     - 21-40: Cold/Skeptical
