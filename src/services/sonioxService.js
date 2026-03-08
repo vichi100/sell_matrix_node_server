@@ -67,8 +67,11 @@ function setupSonioxWebSocket(server, activeCalls) {
                         sentenceBuffer += token.text;
                         lastFinalTokensCount++;
 
-                        // Trigger LLM pipeline when a sentence finishes (punctuation)
-                        if (token.text.match(/[.!?]/)) {
+                        // Trigger LLM pipeline when a sentence finishes (punctuation) OR length > 50 chars
+                        const isPunctuation = token.text.match(/[.!?।]/);
+                        const isTooLong = sentenceBuffer.length > 50;
+
+                        if (isPunctuation || isTooLong) {
                             // Clear interim non-final text from screen so we don't duplicate
                             process.stdout.write('\r' + ' '.repeat(lastOutputLength) + '\r');
                             // Print the confirmed final sentence and drop to a new line!

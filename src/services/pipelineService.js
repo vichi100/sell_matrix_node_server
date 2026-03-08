@@ -44,26 +44,28 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     // === Step 1: PARALLEL Intent & Signal Extraction ===
     const intentPrompt = `
     You are an AI sales assistant listening to a real-time call transcript. 
+    The transcript may contain English, Hindi (Devanagari script), or Hinglish (mixed). You must understand and analyze all of them equally.
     Analyze the recent dialogue and categorize the caller's current intent.
     Choose exactly one of the following categories:
-    - "Information Gathering" (Asking questions, learning)
+    - "Information Gathering" (Asking questions, learning, asking for details)
     - "Objection" (Pushing back on price, timing, or feature)
-    - "Interested" (Showing positive reception)
-    - "Ready to Buy" (Asking for next steps, pricing details, or contract)
-    - "Not Interested" (Trying to leave, hanging up, angry)
+    - "Interested" (Showing positive reception, wanting to visit or see it, "देखने आ सकता हूँ")
+    - "Ready to Buy" (Asking for next steps, exact pricing details, "प्राइस क्या है", "कितना एरिया है")
+    - "Not Interested" (Trying to leave, hanging up, angry, "नहीं चाहिए")
     - "Neutral" (Pleasantries, greeting, unclear)
 
-    Return ONLY a raw JSON object:
-    { "intent": "Chosen Category", "reasoning": "1 short sentence why" }
+    Return ONLY a raw JSON object with the translation and the intent:
+    { "english_translation": "Briefly translate the dialogue to English here to ensure you understood it", "intent": "Chosen Category", "reasoning": "1 short sentence why" }
     `;
 
     const signalPrompt = `
     You are an AI sales assistant. Extract specific "Buying Signals" from this transcript.
-    Buying signals are explicit mentions of timeline, budget, authority, or specific feature needs.
-    If none exist yet, output an empty array.
+    The transcription may be in English, Hindi (Devanagari script), or Hinglish.
+    Buying signals are explicit mentions of timeline, budget, authority, or specific feature needs (e.g., asking for price, area, details, "फ्लैट का प्राइस", "देखने आ सकता हूँ", "मिलने आ सकता हूँ").
+    Extract the actual spoken phrase. If none exist yet, output an empty array.
     
     Return ONLY a raw JSON object:
-    { "buying_signals": ["signal 1", "signal 2"] }
+    { "buying_signals": ["original spoken signal 1", "original spoken signal 2"] }
     `;
 
     // Fire both prompts simultaneously
@@ -90,10 +92,11 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     const scorePrompt = `
     You are an AI sales assistant calculating a deep, contextual "Interest Score" from 0 to 100.
     Based on the caller's transcript, intent, and signals, calculate the highly accurate final score.
+    Understand that the customer may be speaking Hindi (Devanagari script) or Hinglish. Always translate the context to English in your mind before scoring.
     - 0-20: Hostile/Hanging up
     - 21-40: Cold/Skeptical
     - 41-60: Neutral/Information Gathering
-    - 61-80: Warm/Asking specific buying questions
+    - 61-80: Warm/Asking specific buying questions (e.g. asking for prices "प्राइस क्या है", site visits "देखने आना", areas)
     - 81-100: Hot/Ready to close
 
     Transcript:
