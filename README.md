@@ -83,4 +83,9 @@ Once you save the
 .env
  file, nodemon instantly restarts your server, and you're ready to receive calls! Let me know if you run into any other issues!
 
+
+ npm run stop 
+
+ npm run dev  
+
  ####
