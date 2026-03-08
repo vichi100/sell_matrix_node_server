@@ -69,8 +69,9 @@ function setupSonioxWebSocket(server, activeCalls) {
 
                         // Trigger LLM pipeline when a sentence finishes (punctuation)
                         if (token.text.match(/[.!?]/)) {
-                            // Clear current line, print the final sentence + punctuation trigger
+                            // Clear interim non-final text from screen so we don't duplicate
                             process.stdout.write('\r' + ' '.repeat(lastOutputLength) + '\r');
+                            // Print the confirmed final sentence and drop to a new line!
                             process.stdout.write(currentStr + ' ..... \n');
 
                             if (sentenceBuffer.trim().length > 0) {
