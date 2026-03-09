@@ -15,12 +15,12 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Initialize Dashboard Routes and get the shared activeCalls Map
+// Initialize Dashboard Routes
 const dashboardModule = setupDashboardRoutes(telnyx);
-app.use('/api', dashboardModule.router);
+app.use('/api/dashboard', dashboardModule.router);
 
 // Initialize Telnyx Webhook Routes
-const telnyxRouter = setupTelnyxRoutes(telnyx, dashboardModule.activeCalls);
+const telnyxRouter = setupTelnyxRoutes(telnyx);
 app.use('/api/telnyx', telnyxRouter);
 
 // Basic health check route
@@ -34,9 +34,9 @@ const server = http.createServer(app);
 // Configure Transcription Provider
 const transcriber = process.env.TRANSCRIPT_PROVIDER || 'deepgram';
 if (transcriber === 'soniox') {
-    setupSonioxWebSocket(server, dashboardModule.activeCalls);
+    setupSonioxWebSocket(server);
 } else {
-    setupDeepgramWebSocket(server, dashboardModule.activeCalls);
+    setupDeepgramWebSocket(server);
 }
 
 server.listen(PORT, () => {

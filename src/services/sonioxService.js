@@ -2,8 +2,9 @@ const WebSocket = require('ws');
 const { PassThrough } = require('stream');
 const { SonioxNodeClient } = require('@soniox/node');
 const { processUtterance } = require('./pipelineService');
+const redisService = require('./redisService');
 
-function setupSonioxWebSocket(server, activeCalls) {
+function setupSonioxWebSocket(server) {
     const wss = new WebSocket.Server({ server, path: '/media-stream' });
 
     let client = null;
@@ -25,11 +26,23 @@ function setupSonioxWebSocket(server, activeCalls) {
 
         // Find the call_control_id tied to this specific WebSocket stream
         let call_control_id = 'unknown_call';
-        for (const [id, callData] of activeCalls.entries()) {
-            if (callData.status === 'answered') {
-                call_control_id = id;
-                break;
+
+        try {
+            if (redisService.client.isOpen) {
+                const callIds = await redisService.client.sMembers('active_calls');
+                for (const id of callIds) {
+                    const stateStr = await redisService.client.get(`call:${id}:state`);
+                    if (stateStr) {
+                        const state = JSON.parse(stateStr);
+                        if (state.status === 'answered') {
+                            call_control_id = id;
+                            break;
+                        }
+                    }
+                }
             }
+        } catch (e) {
+            console.error('Failed to locate call ID in Redis for WebSocket:', e.message);
         }
 
         let session;
@@ -78,7 +91,7 @@ function setupSonioxWebSocket(server, activeCalls) {
                             process.stdout.write(currentStr + ' ..... \n');
 
                             if (sentenceBuffer.trim().length > 0) {
-                                processUtterance(call_control_id, sentenceBuffer.trim(), activeCalls);
+                                processUtterance(call_control_id, sentenceBuffer.trim());
                                 sentenceBuffer = "";
                             }
                             // Reset tracking for the next sentence
@@ -128,7 +141,7 @@ function setupSonioxWebSocket(server, activeCalls) {
             console.log('\nTelnyx WebSocket connection closed.');
             if (sentenceBuffer.trim().length > 0) {
                 process.stdout.write(' ..... \n');
-                processUtterance(call_control_id, sentenceBuffer.trim(), activeCalls);
+                processUtterance(call_control_id, sentenceBuffer.trim());
             }
             if (session && typeof session.close === 'function') {
                 session.close();

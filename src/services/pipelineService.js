@@ -1,36 +1,35 @@
 const { analyzeWithLLM } = require('./llmService');
-
-// In-memory store of conversation transcripts per active call
-const callContexts = new Map();
+const redisService = require('./redisService');
 
 /**
- * Main entrypoint called by Deepgram whenever a new sentence finishes.
- * It appends the sentence to the context and triggers the LLM pipeline asynchronously.
+ * Main entrypoint called by Deepgram/Soniox whenever a new sentence finishes.
+ * It appends the sentence to Redis and triggers the LLM pipeline asynchronously.
  * 
  * @param {string} call_control_id - ID of the active Telnyx call
- * @param {string} newSentence - The finalized transcript snippet from Deepgram
- * @param {Map} activeCalls - Reference to the global dashboard activeCalls map
+ * @param {string} newSentence - The finalized transcript snippet
  */
-async function processUtterance(call_control_id, newSentence, activeCalls) {
+async function processUtterance(call_control_id, newSentence) {
     if (!newSentence || newSentence.trim() === '') return;
 
-    // 1. Accumulate Context
-    if (!callContexts.has(call_control_id)) {
-        callContexts.set(call_control_id, []);
+    try {
+        // 1. Accumulate Context in Redis List
+        await redisService.addTranscriptSegment(call_control_id, 'caller', newSentence.trim());
+
+        // We only retrieve the last ~5 sentences (approx 1 minute) to keep inference fast
+        const recentContextArray = await redisService.getRecentTranscript(call_control_id, 5);
+        if (recentContextArray.length === 0) return;
+        const recentContext = recentContextArray.join('\n');
+
+        // Log that pipeline started for debug
+        console.log(`\n[Pipeline] Triggered for call ${call_control_id.slice(-6)}...`);
+
+        // Run pipeline asynchronously so it doesn't block the WebSocket stream
+        runAnalysisPipeline(call_control_id, recentContext).catch(err => {
+            console.error('[Pipeline Error]', err.message);
+        });
+    } catch (err) {
+        console.error('[Process Utterance Redis Error]', err.message);
     }
-    const contextHistory = callContexts.get(call_control_id);
-    contextHistory.push(`Caller: ${newSentence.trim()}`);
-
-    // We only send the last ~5 sentences (approx 1 minute) to the LLM to keep inference fast and cheap
-    const recentContext = contextHistory.slice(-5).join('\n');
-
-    // Log that pipeline started for debug
-    console.log(`\n[Pipeline] Triggered for call ${call_control_id.slice(-6)}...`);
-
-    // Run pipeline asynchronously so it doesn't block the WebSocket stream
-    runAnalysisPipeline(call_control_id, recentContext, activeCalls).catch(err => {
-        console.error('[Pipeline Error]', err.message);
-    });
 }
 
 /**
@@ -38,7 +37,7 @@ async function processUtterance(call_control_id, newSentence, activeCalls) {
  * 1. Fires Intent and Signals in PARALLEL for sub-second UI updates.
  * 2. Fires the smart Score Engine SEQUENTIALLY after step 1 completes.
  */
-async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) {
+async function runAnalysisPipeline(call_control_id, recentContext) {
     const startTime = Date.now();
 
     // === Step 1: PARALLEL Intent & Signal Extraction ===
@@ -77,11 +76,11 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     const finalIntent = intentResult?.intent || 'Neutral';
     const finalSignals = signalResult?.buying_signals || [];
 
-    // The AI now decides the instant Fast Score dynamically based on organic dialogue cues, not a rigid script!
+    // The AI now decides the instant Fast Score dynamically based on organic dialogue cues
     let fastScore = intentResult?.provisional_score || 45;
 
-    // Fast Dashboard Update 1 (< 800ms)
-    updateDashboard(call_control_id, activeCalls, finalIntent, finalSignals, fastScore);
+    // Fast Dashboard Update 1 (< 800ms) - Saved Directly to Redis Timeline
+    await redisService.updateScore(call_control_id, fastScore, finalIntent, finalSignals);
     console.log(`\n⚡ [FAST UI UPDATE] (${Date.now() - startTime}ms) Pipeline 1/2 complete`);
 
     // === Step 2: SEQUENTIAL Deep Score Engine ===
@@ -109,8 +108,8 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     const scoreResult = await analyzeWithLLM(scorePrompt, recentContext);
     const deepScore = scoreResult?.interest_score || fastScore;
 
-    // Final Dashboard Update 2 (~1.5s total)
-    updateDashboard(call_control_id, activeCalls, finalIntent, finalSignals, deepScore);
+    // Final Dashboard Update 2 (~1.5s total) - Saved to Redis
+    await redisService.updateScore(call_control_id, deepScore, finalIntent, finalSignals);
 
     // Print beautifully to terminal
     console.log(`\n============== [AI INSIGHTS] (${Date.now() - startTime}ms total) ==============`);
@@ -120,28 +119,15 @@ async function runAnalysisPipeline(call_control_id, recentContext, activeCalls) 
     console.log(`====================================================\n`);
 }
 
-function updateDashboard(call_control_id, activeCalls, intent, signals, score) {
-    if (activeCalls.has(call_control_id)) {
-        const callData = activeCalls.get(call_control_id);
-        const updatedCallData = {
-            ...callData,
-            pipeline: {
-                intent: intent,
-                buying_signals: signals,
-                interest_score: score,
-                last_updated: new Date().toISOString()
-            }
-        };
-        activeCalls.set(call_control_id, updatedCallData);
-    }
-}
-
 /**
- * Clean up memory when a call hangs up
+ * Clean up Redis memory when a call hangs up
  */
-function cleanupCallContext(call_control_id) {
-    if (callContexts.has(call_control_id)) {
-        callContexts.delete(call_control_id);
+async function cleanupCallContext(call_control_id) {
+    try {
+        await redisService.cleanupCall(call_control_id);
+        console.log(`[Redis Cleanup] Scrubbed data for call ${call_control_id.slice(-6)}`);
+    } catch (err) {
+        console.error('[Redis Cleanup Error]', err.message);
     }
 }
 

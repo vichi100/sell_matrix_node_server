@@ -1,21 +1,32 @@
 const WebSocket = require('ws');
 const { processUtterance, cleanupCallContext } = require('./pipelineService');
+const redisService = require('./redisService');
 
-function setupDeepgramWebSocket(server, activeCalls) {
+function setupDeepgramWebSocket(server) {
     const wss = new WebSocket.Server({ server, path: '/media-stream' });
 
-    wss.on('connection', (ws) => {
+    wss.on('connection', async (ws) => {
         console.log('WebSocket connection established on /media-stream');
 
         // Find the call_control_id tied to this specific WebSocket stream
-        // Telnyx unfortunately doesn't send the ID in the WS URL,
-        // so we'll grab the most recently answered call as a rough proxy (in production, use custom stream URLs)
         let call_control_id = 'unknown_call';
-        for (const [id, callData] of activeCalls.entries()) {
-            if (callData.status === 'answered') {
-                call_control_id = id;
-                break;
+
+        try {
+            if (redisService.client.isOpen) {
+                const callIds = await redisService.client.sMembers('active_calls');
+                for (const id of callIds) {
+                    const stateStr = await redisService.client.get(`call:${id}:state`);
+                    if (stateStr) {
+                        const state = JSON.parse(stateStr);
+                        if (state.status === 'answered') {
+                            call_control_id = id;
+                            break;
+                        }
+                    }
+                }
             }
+        } catch (e) {
+            console.error('Failed to locate call ID in Redis for WebSocket:', e.message);
         }
 
         // Connect directly to Deepgram API via raw WebSocket (bypasses SDK param issues)
@@ -85,7 +96,7 @@ function setupDeepgramWebSocket(server, activeCalls) {
                         }
                         // Send full sentence to LLM pipeline
                         if (utteranceBuffer.length > 0) {
-                            processUtterance(call_control_id, utteranceBuffer.join(' '), activeCalls);
+                            processUtterance(call_control_id, utteranceBuffer.join(' '));
                             utteranceBuffer = [];
                         }
                         lastWordEnd = 0; // Reset timeline for new sentence
@@ -96,7 +107,7 @@ function setupDeepgramWebSocket(server, activeCalls) {
                         printedAnything = false;
                     }
                     if (utteranceBuffer.length > 0) {
-                        processUtterance(call_control_id, utteranceBuffer.join(' '), activeCalls);
+                        processUtterance(call_control_id, utteranceBuffer.join(' '));
                         utteranceBuffer = [];
                     }
                     lastWordEnd = 0;
