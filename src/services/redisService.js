@@ -41,6 +41,9 @@ async function addTranscriptSegment(callId, speaker, text) {
     await client.lPush(key, payload);
     await client.lTrim(key, 0, 99); // Keep only last 100 segments
     await client.expire(key, TTL_SECONDS);
+
+    // Provide instant UI updates for the Live Transcript widget
+    await client.publish('transcript_update', JSON.stringify({ call_id: callId, speaker, text }));
 }
 
 async function getRecentTranscript(callId, numSentences = 5) {

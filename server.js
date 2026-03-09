@@ -30,6 +30,10 @@ app.get('/', (req, res) => {
 
 // Setup HTTP and WebSocket Servers
 const server = http.createServer(app);
+const { setupWebSocketServer } = require('./src/services/websocketService');
+
+// Boot up socket.io Push Tunnel
+setupWebSocketServer(server);
 
 // Configure Transcription Provider
 const transcriber = process.env.TRANSCRIPT_PROVIDER || 'deepgram';
